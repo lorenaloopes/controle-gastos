@@ -1,0 +1,4 @@
+# backups com dados pessoais
+controle-gastos-*.json
+*.xlsx
+gastos.csv
