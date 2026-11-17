@@ -604,6 +604,17 @@
   $('#clearAll').onclick = () => { if (confirm('Apagar TODOS os dados deste navegador? Faça um backup antes.')) { state = vazio(); salvar(); toast('Dados apagados'); } };
 
   // ---------- modal genérico ----------
+  // números no formato brasileiro: "10.000,50" → 10000.5 · "1,27" → 1.27 · "10.000" → 10000
+  function numBR(txt) {
+    let s = String(txt ?? '').replace(/[R$\s%]/g, '');
+    if (!s) return 0;
+    if (s.includes(',')) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^-?\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    const n = Number(s);
+    return Number.isFinite(n) ? n : 0;
+  }
+  const fmtBR = (n, dec = 2) => (n === '' || n == null) ? '' : Number(n).toLocaleString('pt-BR', { minimumFractionDigits: dec === 2 ? 2 : 0, maximumFractionDigits: dec });
+
   const dlg = $('#modal');
   $('#modalCancel').onclick = () => dlg.close();
   function abrirModal({ titulo, campos, valores = {}, onSave, onDelete, calc }) {
@@ -617,14 +628,23 @@
         return `<label class="${cls}" data-f="${c.name}">${c.label}<select name="${c.name}">${html}</select></label>`;
       }
       if (c.type === 'checkbox') return `<label class="check ${cls}" data-f="${c.name}"><input type="checkbox" name="${c.name}" ${v ? 'checked' : ''}> ${c.label}</label>`;
+      if (c.type === 'dinheiro' || c.type === 'percent') {
+        const dec = c.type === 'percent' ? 4 : 2;
+        return `<label class="${cls}" data-f="${c.name}">${c.label}<input name="${c.name}" type="text" inputmode="decimal" autocomplete="off" data-dec="${dec}" ${c.required ? 'required' : ''} value="${esc(v === '' ? '' : fmtBR(v, dec))}" placeholder="${c.type === 'percent' ? '0,8' : '0,00'}"></label>`;
+      }
       return `<label class="${cls}" data-f="${c.name}">${c.label}<input name="${c.name}" type="${c.type || 'text'}" ${c.step ? `step="${c.step}"` : ''} ${c.min != null ? `min="${c.min}"` : ''} ${c.required ? 'required' : ''} ${c.list ? `list="dl-${c.name}"` : ''} value="${esc(v)}" placeholder="${esc(c.placeholder || '')}">
         ${c.list ? `<datalist id="dl-${c.name}">${c.list.map((o) => `<option value="${esc(o)}">`).join('')}</datalist>` : ''}</label>`;
     }).join('') + (calc ? '<div class="calc" id="calcBox"></div>' : '');
     const form = $('#modalForm');
     const ler = () => Object.fromEntries(campos.map((c) => {
       const el = form.elements[c.name];
-      return [c.name, c.type === 'checkbox' ? el.checked : c.type === 'number' ? Number(el.value) || 0 : el.value.trim()];
+      return [c.name, c.type === 'checkbox' ? el.checked : c.type === 'number' ? Number(el.value) || 0
+        : (c.type === 'dinheiro' || c.type === 'percent') ? numBR(el.value) : el.value.trim()];
     }));
+    // ao sair do campo, mostra o número como foi entendido (ex.: 10000 → 10.000,00)
+    form.querySelectorAll('input[data-dec]').forEach((el) => {
+      el.onblur = () => { if (el.value.trim()) el.value = fmtBR(numBR(el.value), Number(el.dataset.dec)); };
+    });
     const atualizar = () => { if (calc) { const r = calc(ler(), form); $('#calcBox').innerHTML = r; } };
     form.oninput = atualizar; atualizar();
     $('#modalDelete').style.display = onDelete ? '' : 'none';
@@ -645,7 +665,7 @@
         { name: 'descricao', label: 'Descrição', required: true, full: true, placeholder: 'Ex.: Aluguel' },
         { name: 'categoria', label: 'Categoria', list: state.categorias.map((c) => c.nome) },
         { name: 'tipo', label: 'Tipo', type: 'select', options: [['fixo', 'Fixo (mesmo valor sempre)'], ['variavel', 'Variável (valor muda)']] },
-        { name: 'valor', label: 'Valor (R$)', type: 'number', step: '0.01', min: 0, required: true },
+        { name: 'valor', label: 'Valor (R$)', type: 'dinheiro', required: true },
         { name: 'modoValor', label: 'Esse valor é', type: 'select', default: 'total', options: [['total', 'o total da compra'], ['parcela', 'o valor de cada parcela']] },
         { name: 'forma', label: 'Forma de pagamento', type: 'select', options: [
           { group: 'À vista / vales', options: state.formas.filter((f) => !f.cartao).map((f) => [f.nome, f.nome]) },
@@ -701,7 +721,7 @@
       campos: [
         { name: 'descricao', label: 'Descrição', required: true, full: true, placeholder: 'Ex.: Salário, IRRF, Freela' },
         { name: 'tipo', label: 'Tipo', type: 'select', options: [['receita', 'Receita (entra)'], ['desconto', 'Desconto (sai do bruto)']] },
-        { name: 'valor', label: 'Valor (R$)', type: 'number', step: '0.01', min: 0, required: true },
+        { name: 'valor', label: 'Valor (R$)', type: 'dinheiro', required: true },
         { name: 'frequencia', label: 'Frequência', type: 'select', options: freqOpts },
         { name: 'inicio', label: 'A partir de', type: 'date', required: true },
         { name: 'fim', label: 'Até (opcional)', type: 'month' },
@@ -718,10 +738,10 @@
       valores: i || { taxa: 0.8 },
       campos: [
         { name: 'nome', label: 'Nome', required: true, full: true, placeholder: 'Ex.: Reserva de emergência' },
-        { name: 'saldo', label: 'Saldo atual (R$)', type: 'number', step: '0.01' },
-        { name: 'aporte', label: 'Aporte mensal (R$)', type: 'number', step: '0.01', min: 0 },
-        { name: 'taxa', label: 'Rendimento (% ao mês)', type: 'number', step: '0.01' },
-        { name: 'meta', label: 'Meta (R$, opcional)', type: 'number', step: '0.01', min: 0 },
+        { name: 'saldo', label: 'Saldo atual (R$)', type: 'dinheiro' },
+        { name: 'aporte', label: 'Aporte mensal (R$)', type: 'dinheiro' },
+        { name: 'taxa', label: 'Rendimento (% ao mês)', type: 'percent' },
+        { name: 'meta', label: 'Meta (R$, opcional)', type: 'dinheiro' },
       ],
       calc: (v) => {
         const t = C.mesesAteMeta(v);
