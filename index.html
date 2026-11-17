@@ -151,7 +151,7 @@
         <button class="btn primary" id="novoGasto">+ Novo gasto</button>
       </div>
       <div class="card"><div class="table-wrap"><table class="tbl" id="tblGastos"></table></div></div>
-      <p class="hint">Dica: gasto <b>parcelado</b> = informe o valor total e o nº de parcelas; o site calcula a parcela e quando termina. Gasto no <b>cartão</b> = escolha o cartão em “Forma de pagamento” e use como data o vencimento da fatura.</p>
+      <p class="hint">Dica: gasto <b>parcelado</b> = informe o valor total e o nº de parcelas; o site calcula a parcela e quando termina. Gasto no <b>cartão</b> = escolha o cartão e informe a <b>data da compra</b>: compras depois do dia de fechamento do cartão entram na fatura do mês seguinte (ajuste o fechamento na aba Dados).</p>
     </section>
 
     <!-- RECEITAS -->
@@ -237,6 +237,9 @@
           <h3>Formas de pagamento e cartões</h3>
           <p class="muted">Marque como cartão de crédito para aparecer nas faturas.</p>
           <ul class="chips" id="listaFormas"></ul>
+          <h3 style="margin-top:14px">Cartões de crédito</h3>
+          <p class="muted">Compras feitas <b>depois</b> do dia de fechamento entram na fatura do mês seguinte.</p>
+          <div class="table-wrap"><table class="tbl" id="tblCartoes"></table></div>
           <form class="row" id="formForma">
             <input name="nome" placeholder="Ex.: Nubank" required>
             <label class="inline"><input type="checkbox" name="cartao"> Cartão de crédito</label>

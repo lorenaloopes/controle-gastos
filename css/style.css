@@ -437,3 +437,4 @@ body[data-auth="out"] .login {
 }
 .login-hero .brand span:last-child { display: inline; }
 @media (min-width: 861px) { .login-pitch { margin: auto 0; } .login-hero { justify-content: flex-start; } }
+.tbl input.dia { width: 72px; }

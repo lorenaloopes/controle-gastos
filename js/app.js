@@ -19,7 +19,7 @@
   const FORMAS_PADRAO = [
     { nome: 'Pix', cartao: false }, { nome: 'Débito', cartao: false }, { nome: 'Boleto', cartao: false },
     { nome: 'Dinheiro', cartao: false }, { nome: 'Vale-refeição', cartao: false }, { nome: 'Vale-alimentação', cartao: false },
-    { nome: 'Nubank', cartao: true }, { nome: 'Itaú', cartao: true }, { nome: 'C6', cartao: true }, { nome: 'Inter', cartao: true },
+    ...['Nubank', 'Itaú', 'C6', 'Inter'].map((nome) => ({ nome, cartao: true, fechamento: 6, vencimento: 13 })),
   ];
 
   // Atualizações de dados já salvos (rodam uma vez só por conta de "migracoes")
@@ -33,6 +33,14 @@
         else if (p.cartao) f.cartao = true;
       }
       s.migracoes.formas2 = true;
+      mudou = true;
+    }
+    if (!s.migracoes.fechamento) {
+      for (const f of s.formas) if (f.cartao) {
+        f.fechamento = f.fechamento || C.FECHAMENTO_PADRAO;
+        f.vencimento = f.vencimento || C.VENCIMENTO_PADRAO;
+      }
+      s.migracoes.fechamento = true;
       mudou = true;
     }
     return mudou;
@@ -102,7 +110,7 @@
       i({ nome: 'Reserva de emergência (exemplo)', saldo: 3000, aporte: 300, meta: 12000 }),
       i({ nome: 'Viagem (exemplo)', saldo: 800, aporte: 150, meta: 5000 }),
     ];
-    s.migracoes = { formas2: true };
+    s.migracoes = { formas2: true, fechamento: true };
     return s;
   }
 
@@ -268,12 +276,13 @@
       const f = { unico: 0, semanal: 52 / 12, mensal: 1, bimestral: 1 / 2, trimestral: 1 / 3, semestral: 1 / 6, anual: 1 / 12 }[g.frequencia] ?? 1;
       return g.valor * f;
     };
-    const ativo = (g) => { const f = C.mesFinal(g); return !f || f >= hoje; };
+    const fimDe = (g) => C.mesFinal(C.naFatura(state, g)); // no cartão, pelo mês da última fatura
+    const ativo = (g) => { const f = fimDe(g); return !f || f >= hoje; };
 
     $('#tblGastos').innerHTML = lista.length ? `
-      <thead><tr><th>Descrição</th><th>Categoria</th><th>Tipo</th><th>Frequência</th><th class="num">Valor</th><th class="num">≈ por mês</th><th>Pagamento</th><th>Início</th><th>Termina</th></tr></thead>
+      <thead><tr><th>Descrição</th><th>Categoria</th><th>Tipo</th><th>Frequência</th><th class="num">Valor</th><th class="num">≈ por mês</th><th>Pagamento</th><th>Data</th><th>Termina</th></tr></thead>
       <tbody>${lista.map((g) => {
-        const fim = C.mesFinal(g);
+        const fim = fimDe(g);
         return `<tr class="click" data-id="${g.id}" style="${ativo(g) ? '' : 'opacity:.55'}">
           <td>${esc(g.descricao)}</td><td>${esc(g.categoria)}</td>
           <td><span class="tag ${g.tipo}">${g.tipo === 'fixo' ? 'Fixo' : 'Variável'}</span></td>
@@ -318,14 +327,15 @@
       <tfoot><tr><td>12 meses</td>${cartoes.map((c) => `<td class="num">${brl(linhas.reduce((a, l) => a + l.porCartao[c], 0))}</td>`).join('')}<td class="num">${brl(linhas.reduce((a, l) => a + l.total, 0))}</td></tr></tfoot>`
       : `<tr><td class="empty">Nenhuma forma de pagamento marcada como cartão de crédito (aba Dados).</td></tr>`;
 
-    const parc = state.gastos.filter((g) => g.parcelado).map((g) => ({ g, rest: C.restanteParcelado(g, ini) })).filter((x) => x.rest.parcelas > 0)
+    const parc = state.gastos.filter((g) => g.parcelado).map((g) => ({ g, f: C.naFatura(state, g) }))
+      .map(({ g, f }) => ({ g, f, rest: C.restanteParcelado(f, ini) })).filter((x) => x.rest.parcelas > 0)
       .sort((a, b) => b.rest.valor - a.rest.valor);
     const totalRest = parc.reduce((a, x) => a + x.rest.valor, 0);
     $('#parceladoResumo').textContent = parc.length ? `ainda faltam ${brl(totalRest)} no total` : '';
     $('#tblParcelados').innerHTML = parc.length ? `
       <thead><tr><th>Compra</th><th>Pagamento</th><th class="num">Parcela</th><th class="num">Faltam</th><th class="num">Valor restante</th><th>Última parcela</th></tr></thead>
-      <tbody>${parc.map(({ g, rest }) => `<tr class="click" data-id="${g.id}"><td>${esc(g.descricao)}</td><td>${esc(g.forma)}</td>
-        <td class="num">${brl(C.valorParcela(g))}</td><td class="num">${rest.parcelas} de ${g.parcelas}</td><td class="num">${brl(rest.valor)}</td><td>${C.nomeMes(C.mesFinal(g), true)}</td></tr>`).join('')}</tbody>`
+      <tbody>${parc.map(({ g, f, rest }) => `<tr class="click" data-id="${g.id}"><td>${esc(g.descricao)}</td><td>${esc(g.forma)}</td>
+        <td class="num">${brl(C.valorParcela(g))}</td><td class="num">${rest.parcelas} de ${g.parcelas}</td><td class="num">${brl(rest.valor)}</td><td>${C.nomeMes(C.mesFinal(f), true)}</td></tr>`).join('')}</tbody>`
       : `<tr><td class="empty">Nenhum parcelamento em andamento.</td></tr>`;
     $$('#tblParcelados tr.click').forEach((tr) => (tr.onclick = () => editarGasto(state.gastos.find((g) => g.id === tr.dataset.id))));
   }
@@ -493,8 +503,19 @@
 
   // ---------- dados / config ----------
   function renderConfig() {
-    $('#listaFormas').innerHTML = state.formas.map((f, i) => `<li>${esc(f.nome)}${f.cartao ? ' 💳' : ''}<button data-i="${i}" title="Remover">×</button></li>`).join('');
+    $('#listaFormas').innerHTML = state.formas.map((f, i) => f.cartao ? '' : `<li>${esc(f.nome)}<button data-i="${i}" title="Remover">×</button></li>`).join('');
     $$('#listaFormas button').forEach((b) => (b.onclick = () => { state.formas.splice(b.dataset.i, 1); salvar(); }));
+    const cards = state.formas.map((f, i) => ({ f, i })).filter((x) => x.f.cartao);
+    $('#tblCartoes').innerHTML = cards.length ? `<thead><tr><th>Cartão</th><th class="num">Fecha dia</th><th class="num">Vence dia</th><th></th></tr></thead><tbody>${cards.map(({ f, i }) => `
+      <tr><td>💳 ${esc(f.nome)}</td>
+      <td class="num"><input class="pago dia" type="number" min="1" max="31" data-i="${i}" data-k="fechamento" value="${f.fechamento || C.FECHAMENTO_PADRAO}"></td>
+      <td class="num"><input class="pago dia" type="number" min="1" max="31" data-i="${i}" data-k="vencimento" value="${f.vencimento || C.VENCIMENTO_PADRAO}"></td>
+      <td><button class="btn ghost small" data-del="${i}" title="Remover">×</button></td></tr>`).join('')}</tbody>` : '<tr><td class="empty">Nenhum cartão.</td></tr>';
+    $$('#tblCartoes input').forEach((inp) => (inp.onchange = () => {
+      const v = Math.min(31, Math.max(1, Math.round(Number(inp.value)) || 1));
+      state.formas[inp.dataset.i][inp.dataset.k] = v; salvar();
+    }));
+    $$('#tblCartoes [data-del]').forEach((b) => (b.onclick = () => { state.formas.splice(b.dataset.del, 1); salvar(); }));
     $('#tblCats').innerHTML = `<thead><tr><th>Categoria</th><th class="num">Limite mensal</th><th></th></tr></thead><tbody>${state.categorias.map((c, i) => `
       <tr><td>${esc(c.nome)}</td><td class="num"><input class="pago" type="number" min="0" step="0.01" data-i="${i}" value="${c.limite || ''}" placeholder="—"></td>
       <td><button class="btn ghost small" data-del="${i}" title="Remover">×</button></td></tr>`).join('')}</tbody>`;
@@ -504,7 +525,11 @@
   $('#formForma').onsubmit = (e) => {
     e.preventDefault();
     const f = e.target, nome = f.nome.value.trim();
-    if (nome && !state.formas.some((x) => x.nome === nome)) state.formas.push({ nome, cartao: f.cartao.checked });
+    if (nome && !state.formas.some((x) => x.nome === nome)) {
+      state.formas.push(f.cartao.checked
+        ? { nome, cartao: true, fechamento: C.FECHAMENTO_PADRAO, vencimento: C.VENCIMENTO_PADRAO }
+        : { nome, cartao: false });
+    }
     f.reset(); salvar();
   };
   $('#formCat').onsubmit = (e) => {
@@ -589,7 +614,7 @@
         { name: 'parcelado', label: 'É parcelado', type: 'checkbox', full: true },
         { name: 'parcelas', label: 'Nº de parcelas', type: 'number', min: 1, step: '1' },
         { name: 'frequencia', label: 'Frequência', type: 'select', options: freqOpts },
-        { name: 'inicio', label: 'Data / 1º vencimento', type: 'date', required: true },
+        { name: 'inicio', label: 'Data (no cartão: data da compra)', type: 'date', required: true },
         { name: 'fim', label: 'Termina em (opcional)', type: 'month' },
         { name: 'obs', label: 'Observação', full: true },
       ],
@@ -599,11 +624,20 @@
         form.querySelector('[data-f=fim]').style.display = v.parcelado || v.frequencia === 'unico' ? 'none' : '';
         form.querySelector('[data-f=modoValor]').style.display = v.parcelado ? '' : 'none';
         if (!v.inicio || !v.valor) return 'Preencha valor e data para ver o cálculo.';
-        const item = { ...v, parcelas: Math.max(1, v.parcelas || 1) };
-        if (item.parcelado && item.modoValor === 'parcela') item.valor = C.r2(item.valor * item.parcelas);
-        if (item.parcelado) return `<b>${item.parcelas}x de ${brl(C.valorParcela(item))}</b> = ${brl(item.valor)} · última parcela em ${C.nomeMes(C.mesFinal(item))}`;
-        const anual = Array.from({ length: 12 }, (_, i) => C.valorNoMes(item, C.addMonths(v.inicio.slice(0, 7), i))).reduce((a, b) => a + b, 0);
-        return item.frequencia === 'unico' ? `Pagamento único em ${C.nomeMes(v.inicio.slice(0, 7))}` : `Custa <b>${brl(anual)}</b> nos próximos 12 meses (≈ ${brl(anual / 12)}/mês)`;
+        const bruto = { ...v, parcelas: Math.max(1, v.parcelas || 1) };
+        if (bruto.parcelado && bruto.modoValor === 'parcela') bruto.valor = C.r2(bruto.valor * bruto.parcelas);
+        const item = C.naFatura(state, bruto);
+        const card = C.cartaoDe(state, v.forma);
+        let aviso = '';
+        if (card) {
+          const fat = C.mesDaFatura(v.inicio, card);
+          const depois = Number(v.inicio.slice(8, 10)) > card.fech;
+          aviso = `<div style="margin-bottom:6px">💳 ${esc(card.nome)} fecha dia ${card.fech}: compra ${depois ? '<b>depois do</b>' : 'até o'} fechamento → entra na <b>fatura de ${C.nomeMes(fat)}</b> (vence dia ${card.venc}).</div>`;
+        }
+        if (item.parcelado) return aviso + `<b>${item.parcelas}x de ${brl(C.valorParcela(item))}</b> = ${brl(item.valor)} · última parcela em ${C.nomeMes(C.mesFinal(item))}`;
+        const ini = item.inicio.slice(0, 7);
+        const anual = Array.from({ length: 12 }, (_, i) => C.valorNoMes(item, C.addMonths(ini, i))).reduce((a, b) => a + b, 0);
+        return aviso + (item.frequencia === 'unico' ? `Pagamento único em ${C.nomeMes(ini)}` : `Custa <b>${brl(anual)}</b> nos próximos 12 meses (≈ ${brl(anual / 12)}/mês)`);
       },
       onSave: (v) => {
         if (v.categoria && !state.categorias.some((c) => c.nome === v.categoria)) state.categorias.push({ nome: v.categoria, limite: 0 });

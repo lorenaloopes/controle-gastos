@@ -26,9 +26,45 @@ const Calc = (() => {
     return curto ? s.replace('.', '').replace(' de ', '/') : s.replace(' de ', ' de ');
   };
 
+  // ---------- Cartão de crédito: fechamento e vencimento ----------
+  // Compra até o dia do fechamento entra na fatura que fecha nesse mês; depois dele, na seguinte.
+  // "Fatura de M" = fatura que VENCE no mês M.
+  const FECHAMENTO_PADRAO = 6, VENCIMENTO_PADRAO = 13;
+  const diaDe = (iso) => Number(iso.slice(8, 10)) || 1;
+
+  function cartaoDe(state, forma) {
+    const f = state.formas.find((x) => x.nome === forma && x.cartao);
+    if (!f) return null;
+    const fech = Math.min(31, Math.max(1, Number(f.fechamento) || FECHAMENTO_PADRAO));
+    const venc = Math.min(31, Math.max(1, Number(f.vencimento) || VENCIMENTO_PADRAO));
+    return { nome: f.nome, fech, venc };
+  }
+
+  // Em que mês vence a fatura de uma compra feita na data `iso`
+  function mesDaFatura(iso, c) {
+    let i = dateToIdx(iso);
+    if (diaDe(iso) > c.fech) i += 1;   // passou do fechamento → próxima fatura
+    if (c.venc <= c.fech) i += 1;      // vencimento cai no mês seguinte ao fechamento
+    return idxToYm(i);
+  }
+
+  // Versão do gasto "vista pela fatura": datas trocadas para os meses de vencimento
+  function naFatura(state, g) {
+    const c = cartaoDe(state, g.forma);
+    if (!c || !g.inicio) return g;
+    const fat = mesDaFatura(g.inicio, c);
+    const desloc = ymToIdx(fat) - dateToIdx(g.inicio);
+    const out = { ...g, _venc: c.venc, _compra: g.inicio };
+    if (g.frequencia === 'semanal' && !g.parcelado) { out._cartao = c; return out; }
+    out.inicio = `${fat}-${String(c.venc).padStart(2, '0')}`;
+    if (g.fim) out.fim = addMonths(g.fim, desloc);
+    return out;
+  }
+
   // Quantas vezes um item recorrente acontece no mês (0, 1 ou 4/5 para semanal)
   function vezesNoMes(item, ym) {
     if (!item.inicio) return 0;
+    if (item._cartao) return semanalNaFatura(item, ym);
     const m = ymToIdx(ym), s = dateToIdx(item.inicio);
     if (m < s) return 0;
     if (item.fim && m > ymToIdx(item.fim)) return 0;
@@ -55,6 +91,26 @@ const Calc = (() => {
     return (m - s) % passo === 0 ? 1 : 0;
   }
 
+  // Compras semanais no cartão: conta cada compra pela fatura em que ela cai
+  function semanalNaFatura(item, ym) {
+    const ini = new Date(item.inicio + 'T00:00:00');
+    const fimIdx = item.fim ? ymToIdx(item.fim) : Infinity;
+    const alvo = ymToIdx(ym);
+    let c = 0;
+    for (let k = -2; k <= 0; k++) {
+      const [y, mo] = idxToYm(alvo + k).split('-').map(Number);
+      if (alvo + k > fimIdx) continue;
+      const ultimo = new Date(y, mo, 0).getDate();
+      for (let d = 1; d <= ultimo; d++) {
+        const dt = new Date(y, mo - 1, d);
+        if (dt.getDay() !== ini.getDay() || dt < ini) continue;
+        const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+        if (mesDaFatura(iso, item._cartao) === ym) c++;
+      }
+    }
+    return c;
+  }
+
   // Valor de uma parcela; a última absorve o arredondamento
   function valorParcela(item, ym) {
     const n = Math.max(1, Number(item.parcelas) || 1);
@@ -75,7 +131,7 @@ const Calc = (() => {
   }
 
   function vencimentoNoMes(item, ym) {
-    const dia = Number(item.inicio.slice(8, 10)) || 1;
+    const dia = item._venc || Number(item.inicio.slice(8, 10)) || 1;
     const [y, m] = ym.split('-').map(Number);
     const ultimo = new Date(y, m, 0).getDate();
     return `${ym}-${String(Math.min(dia, ultimo)).padStart(2, '0')}`;
@@ -104,13 +160,14 @@ const Calc = (() => {
   function contasDoMes(state, ym) {
     const hoje = todayIso();
     const out = [];
-    for (const g of state.gastos) {
+    for (const original of state.gastos) {
+      const g = naFatura(state, original); // no cartão, conta no mês em que a fatura vence
       const previsto = valorNoMes(g, ym);
       if (!previsto) continue;
       const pg = state.pagamentos[`${g.id}|${ym}`];
       const venc = vencimentoNoMes(g, ym);
       out.push({
-        gasto: g,
+        gasto: original,
         previsto,
         pago: pg ? r2(pg.valor) : 0,
         dataPagamento: pg?.data || '',
@@ -177,7 +234,7 @@ const Calc = (() => {
       const porCartao = Object.fromEntries(cartoes.map((c) => [c, 0]));
       for (const g of state.gastos) {
         if (!cartoes.includes(g.forma)) continue;
-        porCartao[g.forma] = r2(porCartao[g.forma] + valorNoMes(g, ym));
+        porCartao[g.forma] = r2(porCartao[g.forma] + valorNoMes(naFatura(state, g), ym));
       }
       linhas.push({ ym, porCartao, total: r2(Object.values(porCartao).reduce((a, b) => a + b, 0)) });
     }
@@ -207,6 +264,7 @@ const Calc = (() => {
   return {
     FREQ, r2, ymToIdx, idxToYm, addMonths, todayYm, todayIso, nomeMes,
     vezesNoMes, valorNoMes, valorParcela, mesFinal, restanteParcelado,
+    cartaoDe, mesDaFatura, naFatura, FECHAMENTO_PADRAO, VENCIMENTO_PADRAO,
     contasDoMes, receitasDoMes, resumoMes, projecao, faturas, projecaoInvest, mesesAteMeta, ehCartao,
   };
 })();
