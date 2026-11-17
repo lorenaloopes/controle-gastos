@@ -130,11 +130,17 @@
           <div class="card-head"><h3>Contas do mês</h3><span class="muted" id="contasResumo"></span></div>
           <div class="table-wrap"><table class="tbl" id="contasMes"></table></div>
         </div>
-        <div class="card">
-          <div class="card-head"><h3>Para onde vai o dinheiro</h3></div>
-          <div id="catBars" class="hbars"></div>
-          <div class="split" id="fixoVar"></div>
-          <div id="limites"></div>
+        <div class="col-stack">
+          <div class="card" id="cardFaturas" hidden>
+            <div class="card-head"><h3>Faturas dos cartões</h3><span class="muted" id="faturasTotal"></span></div>
+            <div id="faturasMes" class="faturas-mes"></div>
+          </div>
+          <div class="card">
+            <div class="card-head"><h3>Para onde vai o dinheiro</h3></div>
+            <div id="catBars" class="hbars"></div>
+            <div class="split" id="fixoVar"></div>
+            <div id="limites"></div>
+          </div>
         </div>
       </div>
     </section>

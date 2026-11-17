@@ -217,8 +217,10 @@
       };
     });
 
+    renderFaturasMes(r);
+
     // por categoria
-    const cats = Object.entries(r.porCat).sort((a, b) => b[1] - a[1]);
+    const cats =Object.entries(r.porCat).sort((a, b) => b[1] - a[1]);
     const max = Math.max(1, ...cats.map((x) => x[1]));
     $('#catBars').innerHTML = cats.map(([n, v]) => `
       <div class="hbar" data-tip="${esc(n)}|${brl(v)}|${r.despesas ? Math.round((v / r.despesas) * 100) : 0}% das despesas">
@@ -240,6 +242,44 @@
         <span class="num">${brl(usado)} / ${brl(c.limite)} ${pct > 1 ? '· estourou ' + brl(usado - c.limite) : ''}</span></div>
         <div class="track"><div class="fill" style="width:${Math.min(100, pct * 100)}%"></div></div></div>`;
     }).join('') : '';
+  }
+
+  // total de cada cartão no mês (fatura que vence neste mês)
+  function renderFaturasMes(r) {
+    const porCartao = new Map();
+    for (const c of r.contas) {
+      if (!C.ehCartao(state, c.gasto.forma)) continue;
+      const f = porCartao.get(c.gasto.forma) || { nome: c.gasto.forma, total: 0, pago: 0, itens: [], venc: c.vencimento };
+      f.total += c.status === 'pago' ? c.pago : c.previsto;
+      if (c.status === 'pago') f.pago += c.pago;
+      f.itens.push(c);
+      porCartao.set(f.nome, f);
+    }
+    const lista = [...porCartao.values()].sort((a, b) => b.total - a.total);
+    $('#cardFaturas').hidden = !lista.length;
+    if (!lista.length) { $('#faturasMes').innerHTML = ''; $('#faturasTotal').textContent = ''; return; }
+    const soma = lista.reduce((s, f) => s + f.total, 0);
+    $('#faturasTotal').textContent = brl(soma);
+    $('#faturasMes').innerHTML = lista.map((f) => {
+      const pendentes = f.itens.filter((c) => c.status !== 'pago').length;
+      const pct = f.total ? Math.min(100, (f.pago / f.total) * 100) : 0;
+      return `<div class="fat" data-cartao="${esc(f.nome)}">
+        <div class="ico"><svg><use href="#i-cartoes"/></svg></div>
+        <div><div class="nome">${esc(f.nome)}</div>
+          <div class="meta">vence ${dataBr(f.venc).slice(0, 5)} · ${f.itens.length} lançamento(s)${f.pago ? ` · pago ${brl(f.pago)}` : ''}</div>
+          <div class="track"><div class="fill" style="width:${pct}%"></div></div></div>
+        <div class="dir"><span class="valor">${brl(f.total)}</span>
+          ${pendentes ? '<button class="btn small soft pagarFat">Marcar paga</button>' : '<span class="status pago">✓ Paga</span>'}</div>
+      </div>`;
+    }).join('');
+    $$('#faturasMes .pagarFat').forEach((b) => {
+      b.onclick = () => {
+        const f = porCartao.get(b.closest('.fat').dataset.cartao);
+        for (const c of f.itens) if (c.status !== 'pago') state.pagamentos[`${c.gasto.id}|${mesAtual}`] = { valor: c.previsto, data: C.todayIso() };
+        salvar();
+        toast(`Fatura ${f.nome} marcada como paga`);
+      };
+    });
   }
 
   function statusTag(s, c) {
